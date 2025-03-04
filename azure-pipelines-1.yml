@@ -1,0 +1,127 @@
+trigger:
+- main
+
+resources:
+- repo: self
+
+variables:
+
+  # Container registry service connection established during pipeline creation
+  dockerRegistryServiceConnection: 'a4603337-9ed9-46c6-8f8c-81a02241eb1a'
+  imageRepository: 'myapp'
+  containerRegistry: 'pocaksregistry.azurecr.io'
+  dockerfilePath: '**/Dockerfile'
+  tag: '$(Build.BuildId)'
+  imagePullSecret: 'pocaksregistry41cc-auth'
+
+  # Agent VM image name
+  vmImageName: 'ubuntu-latest'
+
+  # Dependency-Track Variables
+  DEPENDENCY_TRACK_URL: "http://13.71.124.102:8080"
+  DEPENDENCY_TRACK_API_KEY: "odt_cotAAKi5aV1x9KhEwaZzwK8mcoTwtRCo"
+  FULL_IMAGE_NAME: "$(containerRegistry)/$(imageRepository):$(tag)"
+
+stages:
+- stage: Build
+  displayName: Build stage
+  jobs:
+  - job: Build
+    displayName: Build and Push Image
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: Docker@2
+      displayName: "Build and Push Image to ACR"
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+
+    - upload: manifests
+      artifact: manifests
+
+- stage: KBOM
+  displayName: Generate SBOM and Scan for Vulnerabilities
+  dependsOn: Build
+  jobs:
+  - job: GenerateKBOM
+    displayName: Generate SBOM and Scan Image
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - script: |
+        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+        syft version
+      displayName: "Install Syft"
+
+    - script: |
+        syft $(FULL_IMAGE_NAME) -o json > sbom.json
+      displayName: "Generate SBOM with Syft"
+
+    - script: |
+        curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+        trivy --version
+      displayName: "Install Trivy"
+
+    - script: |
+        trivy image --format json -o trivy-report.json $(FULL_IMAGE_NAME)
+      displayName: "Scan Image for Vulnerabilities with Trivy"
+
+    - task: PublishBuildArtifacts@1
+      displayName: "Upload SBOM and Trivy Reports"
+      inputs:
+        pathToPublish: "$(System.DefaultWorkingDirectory)"
+        artifactName: "KBOM-Reports"
+
+- stage: UploadDependencyTrack
+  displayName: Upload Reports to OWASP Dependency-Track
+  dependsOn: KBOM
+  jobs:
+  - job: UploadReports
+    displayName: Upload SBOM & Vulnerability Reports
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - script: |
+        curl -X POST -H "X-Api-Key: $(DEPENDENCY_TRACK_API_KEY)" -F "file=@sbom.json" $(DEPENDENCY_TRACK_URL)/api/v1/bom
+      displayName: "Upload SBOM to OWASP Dependency-Track"
+
+    - script: |
+        curl -X POST -H "X-Api-Key: $(DEPENDENCY_TRACK_API_KEY)" -F "file=@trivy-report.json" $(DEPENDENCY_TRACK_URL)/api/v1/vulnerability
+      displayName: "Upload Vulnerability Report to OWASP Dependency-Track"
+
+- stage: Deploy
+  displayName: Deploy stage
+  dependsOn: UploadDependencyTrack
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy to Kubernetes
+    pool:
+      vmImage: $(vmImageName)
+    environment: 'bhattyash32kuberneteshelloworldpythonflask.default'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: KubernetesManifest@0
+            displayName: Create imagePullSecret
+            inputs:
+              action: createSecret
+              secretName: $(imagePullSecret)
+              dockerRegistryEndpoint: $(dockerRegistryServiceConnection)
+
+          - task: KubernetesManifest@0
+            displayName: Deploy to Kubernetes Cluster
+            inputs:
+              action: deploy
+              manifests: |
+                $(Pipeline.Workspace)/manifests/deployment.yml
+                $(Pipeline.Workspace)/manifests/service.yml
+              imagePullSecrets: |
+                $(imagePullSecret)
+              containers: |
+                $(containerRegistry)/$(imageRepository):$(tag)
