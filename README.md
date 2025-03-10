@@ -1,187 +1,192 @@
-## 🎓 Pragmatic AI Labs | Join 1M+ ML Engineers
+# **Devtron CI Security Scanning with Dependency-Track, Syft, and Trivy**
 
-### 🔥 Hot Course Offers:
-* 🤖 [Master GenAI Engineering](https://ds500.paiml.com/learn/course/0bbb5/) - Build Production AI Systems
-* 🦀 [Learn Professional Rust](https://ds500.paiml.com/learn/course/g6u1k/) - Industry-Grade Development
-* 📊 [AWS AI & Analytics](https://ds500.paiml.com/learn/course/31si1/) - Scale Your ML in Cloud
-* ⚡ [Production GenAI on AWS](https://ds500.paiml.com/learn/course/ehks1/) - Deploy at Enterprise Scale
-* 🛠️ [Rust DevOps Mastery](https://ds500.paiml.com/learn/course/ex8eu/) - Automate Everything
-
-### 🚀 Level Up Your Career:
-* 💼 [Production ML Program](https://paiml.com) - Complete MLOps & Cloud Mastery
-* 🎯 [Start Learning Now](https://ds500.paiml.com) - Fast-Track Your ML Career
-* 🏢 Trusted by Fortune 500 Teams
-
-Learn end-to-end ML engineering from industry veterans at [PAIML.COM](https://paiml.com)
-
-# Kubernetes Hello World
-A Kubernetes Hello World Project for Python Flask.  This project uses [a simple Flask app that returns correct change](https://github.com/noahgift/flask-change-microservice) as the base project and converts it to Kubernetes.
-![kubernetes-load-balanced-cluster](https://user-images.githubusercontent.com/58792/111511557-3f45a280-8725-11eb-8e4a-5f5ef787796d.png)
-
-This recipe is in the book Practical MLOps.
-
-![9781098103002](https://user-images.githubusercontent.com/58792/111000927-eb1b7680-8350-11eb-8e24-d41064590fc1.jpeg)
-
-
-## Assets in Repo
-
-* `Makefile`:  [Builds project](https://github.com/noahgift/kubernetes-hello-world-python-flask/blob/main/Makefile)
-* `Dockerfile`:  [Container configuration](https://github.com/noahgift/kubernetes-hello-world-python-flask/blob/main/Dockerfile)
-* `app.py`:  [Flask app](https://github.com/noahgift/kubernetes-hello-world-python-flask/blob/main/app.py)
-* `kube-hello-change.yaml`: [Kubernetes YAML Config](https://github.com/noahgift/kubernetes-hello-world-python-flask/blob/main/kube-hello-change.yaml)
-
-## Get Started
-
-* Create Python virtual environment `python3 -m venv ~/.kube-hello && source ~/.kube-hello/bin/activate`
-* Run `make all` to install python libraries, lint project, including `Dockerfile` and run tests
-
-## Build and Run Docker Container
-
-* Install [Docker Desktop](https://www.docker.com/products/docker-desktop)
-
-* To build the image locally do the following.
-
-`docker build -t flask-change:latest .` or run `make build` which has the same command.
-
-* To verify container run `docker image ls`
-
-* To run do the following:  `docker run -p 8080:8080 flask-change` or run `make run` which has the same command
-
-* In a separate terminal invoke the web service via curl, or run `make invoke` which has the same command 
-
-`curl http://127.0.0.1:8080/change/1/34`
-
-```bash
-[
-  {
-    "5": "quarters"
-  }, 
-  {
-    "1": "nickels"
-  }, 
-  {
-    "4": "pennies"
-  }
-]
-```
-
-* Stop the running docker container by using `control-c` command
-
-## Running Kubernetes Locally
-
-* Verify Kubernetes is working via docker-desktop context
-
-```bash
-(.kube-hello) ➜  kubernetes-hello-world-python-flask git:(main) kubectl get nodes
-NAME             STATUS   ROLES    AGE   VERSION
-docker-desktop   Ready    master   30d   v1.19.3
-```
-
-* Run the application in Kubernetes using the following command which tells Kubernetes to setup the load balanced service and run it:  
-
-`kubectl apply -f kube-hello-change.yaml` or run `make run-kube` which has the same command
-
-You can see from the config file that a load-balancer along with three nodes is the configured application.
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: hello-flask-change-service
-spec:
-  selector:
-    app: hello-python
-  ports:
-  - protocol: "TCP"
-    port: 8080
-    targetPort: 8080
-  type: LoadBalancer
+## **Overview**
+This repository provides an automated solution for container security scanning in **Devtron CI/CD**.  
+It integrates **Syft** and **Trivy** to generate **Software Bill of Materials (SBOMs)** and **vulnerability reports**, which are then uploaded to **Dependency-Track** for monitoring.
 
 ---
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: hello-python
-spec:
-  selector:
-    matchLabels:
-      app: hello-python
-  replicas: 3
-  template:
-    metadata:
-      labels:
-        app: hello-python
-    spec:
-      containers:
-      - name: flask-change
-        image: flask-change:latest
-        imagePullPolicy: Never
-        ports:
-        - containerPort: 8080
-```
 
-* Verify the container is running
+## **1. Features**
+✔️ **Automated SBOM and vulnerability scanning** after container image build  
+✔️ **Uses Syft for SBOM generation**  
+✔️ **Uses Trivy for vulnerability detection**  
+✔️ **Uploads scan reports to Dependency-Track** via API  
+✔️ **Runs in Devtron CI/CD pipelines**  
 
-`kubectl get pods`
+---
 
-Here is the output:
+## **2. Prerequisites**
+Ensure you have:
+- **A running Kubernetes cluster**
+- **Helm installed**
+- **Dependency-Track deployed using Helm**
+- **Devtron CI/CD configured**
+- **Valid API Token & Project UUID for Dependency-Track**
 
+---
+
+## **3. Installation of Dependency-Track (Helm)**
 ```bash
-NAME                            READY   STATUS    RESTARTS   AGE
-flask-change-7b7d7f467b-26htf   1/1     Running   0          8s
-flask-change-7b7d7f467b-fh6df   1/1     Running   0          7s
-flask-change-7b7d7f467b-fpsxr   1/1     Running   0          6s
+helm repo add dependency-track https://dependencytrack.github.io/helm-charts
+helm repo update
+helm install dtrack dependency-track/dependency-track --namespace dtrack --create-namespace
 ```
 
-* Describe the load balanced service:
-
-`kubectl describe services hello-python-service`
-
-You should see output similar to this:
-
+Verify Deployment:
 ```bash
-Name:                     hello-python-service
-Namespace:                default
-Labels:                   <none>
-Annotations:              <none>
-Selector:                 app=hello-python
-Type:                     LoadBalancer
-IP Families:              <none>
-IP:                       10.101.140.123
-IPs:                      <none>
-LoadBalancer Ingress:     localhost
-Port:                     <unset>  8080/TCP
-TargetPort:               8080/TCP
-NodePort:                 <unset>  30301/TCP
-Endpoints:                10.1.0.27:8080,10.1.0.28:8080,10.1.0.29:8080
-Session Affinity:         None
-External Traffic Policy:  Cluster
-Events:                   <none>
+kubectl get pods -n dtrack
 ```
 
-Invoke the endpoint to curl it:  
+---
 
-`make invoke`
+## **4. Setup in Devtron CI/CD**
+### **4.1 Define Environment Variables**
+Before running the script, configure these variables in **Devtron CI/CD**:
 
-```bash
-curl http://127.0.0.1:8080/change/1/34
-[
-  {
-    "5": "quarters"
-  }, 
-  {
-    "1": "nickels"
-  }, 
-  {
-    "4": "pennies"
-  }
-]
+| Variable               | Description |
+|------------------------|------------|
+| `IMAGE_NAME`           | Container image name (e.g., `myrepo/app:latest`) |
+| `SBOM_REPORT_FILE`     | Path to store the Syft SBOM file (`sbom.json`) |
+| `TRIVY_REPORT_FILE`    | Path to store the Trivy scan file (`trivy.json`) |
+| `TRIVY_CYCLONEDX_FILE` | Path to store Trivy CycloneDX SBOM (`trivy-cyclonedx.json`) |
+| `DTRACK_API_URL`       | Dependency-Track API endpoint (e.g., `http://dtrack.example.com/api/v1/bom`) |
+| `DTRACK_API_KEY`       | API Key for Dependency-Track |
+| `PROJECT_UUID`         | Unique Project UUID in Dependency-Track |
+
+---
+
+## **5. Security Scanning Script**
+### **5.1 Script for Devtron CI/CD**
+Save the following script as `security_scan.sh` and integrate it into your **Devtron CI/CD pipeline**.
+
+```sh
+#!/bin/sh
+set -eo pipefail
+#set -v  ## Uncomment for debugging
+
+# Function to install Syft if not installed
+install_syft() {
+    echo "Syft not found. Installing..."
+    curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+    echo "Syft installed successfully."
+}
+
+# Function to install Trivy if not installed
+install_trivy() {
+    echo "Trivy not found. Installing..."
+    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+    echo "Trivy installed successfully."
+}
+
+# Check if Syft is installed; install if missing
+if ! command -v syft &> /dev/null; then
+    install_syft
+else
+    echo "Syft is already installed."
+fi
+
+# Check if Trivy is installed; install if missing
+if ! command -v trivy &> /dev/null; then
+    install_trivy
+else
+    echo "Trivy is already installed."
+fi
+
+# Run Syft scan to generate a CycloneDX SBOM
+echo "Scanning the container image ($IMAGE_NAME) with Syft..."
+if syft "$IMAGE_NAME" -o cyclonedx-json > "$SBOM_REPORT_FILE"; then
+    echo "Syft scan complete. SBOM saved at $SBOM_REPORT_FILE."
+else
+    echo "Syft scan failed!" >&2
+    exit 1
+fi
+
+# Run Trivy scan to generate a JSON vulnerability report
+echo "Scanning the container image ($IMAGE_NAME) with Trivy..."
+if trivy image --format json --output "$TRIVY_REPORT_FILE" "$IMAGE_NAME"; then
+    echo "Trivy scan complete. Report saved at $TRIVY_REPORT_FILE."
+else
+    echo "Trivy scan failed!" >&2
+    exit 1
+fi
+
+# Convert Trivy vulnerability report to CycloneDX format
+echo "Converting Trivy report to CycloneDX format..."
+if trivy image --format cyclonedx --output "$TRIVY_CYCLONEDX_FILE" "$IMAGE_NAME"; then
+    echo "Trivy CycloneDX report saved at $TRIVY_CYCLONEDX_FILE."
+else
+    echo "Trivy CycloneDX conversion failed!" >&2
+    exit 1
+fi
+
+# Upload Syft SBOM report to Dependency-Track
+echo "Uploading Syft SBOM report to Dependency-Track..."
+if curl -X "POST" "$DTRACK_API_URL" \
+     -H "Content-Type: multipart/form-data" \
+     -H "X-Api-Key: $DTRACK_API_KEY" \
+     -F "project=$PROJECT_UUID" \
+     -F "bom=@$SBOM_REPORT_FILE"; then
+    echo "Syft SBOM uploaded successfully."
+else
+    echo "Failed to upload Syft SBOM to Dependency-Track!" >&2
+    exit 1
+fi
+
+# Upload Trivy CycloneDX report to Dependency-Track
+echo "Uploading Trivy vulnerability report to Dependency-Track..."
+if curl -X "POST" "$DTRACK_API_URL" \
+     -H "Content-Type: multipart/form-data" \
+     -H "X-Api-Key: $DTRACK_API_KEY" \
+     -F "project=$PROJECT_UUID" \
+     -F "bom=@$TRIVY_CYCLONEDX_FILE"; then
+    echo "Trivy vulnerability report uploaded successfully."
+else
+    echo "Failed to upload Trivy report to Dependency-Track!" >&2
+    exit 1
+fi
+
+echo "Security scans completed successfully."
 ```
 
-To cleanup the deployment do the following: `kubectl delete deployment hello-python`
+---
 
-## References
+## **6. Running the Script in Devtron CI**
+- Add the script to **Devtron CI/CD pipeline** as a post-image-build stage.
+- Ensure all **environment variables** are configured in the pipeline.
+- The script will:
+  1. Install **Syft** and **Trivy** (if not present).
+  2. Run security scans on the built image.
+  3. Generate SBOM & vulnerability reports.
+  4. Upload reports to **Dependency-Track**.
 
-* Azure [Kubernetes deployment strategy](https://azure.microsoft.com/en-us/overview/kubernetes-deployment-strategy/)
-* Service [Cluster Config](https://kubernetes.io/docs/tasks/access-application-cluster/service-access-application-cluster/) YAML file
-* [Kubernetes.io Hello World](https://kubernetes.io/blog/2019/07/23/get-started-with-kubernetes-using-python/)
+---
+
+## **7. Validating Reports in Dependency-Track**
+After the script execution:
+1. **Login to Dependency-Track UI**
+2. **Go to "Projects"**
+3. **Select the respective project**
+4. **View uploaded SBOM & vulnerability reports**  
+   - Vulnerability trends
+   - Dependency insights
+   - Security posture of the image
+
+---
+
+## **8. Tools Used**
+| Tool  | Purpose |
+|-------|---------|
+| [Dependency-Track](https://docs.dependencytrack.org/) | SBOM & Vulnerability Management |
+| [Syft](https://github.com/anchore/syft) | SBOM Generation |
+| [Trivy](https://github.com/aquasecurity/trivy) | Vulnerability Scanning |
+| [Devtron](https://devtron.ai/) | CI/CD Pipeline |
+
+---
+
+## **9. Conclusion**
+✔ **Automated security scanning in Devtron CI**  
+✔ **Syft & Trivy ensure comprehensive SBOM & vulnerability detection**  
+✔ **Dependency-Track enables monitoring & risk assessment**  
+✔ **Seamless API integration uploads reports automatically**  
+
+🚀 **Secure your DevOps pipeline with automated SBOM scanning & vulnerability tracking!** 🚀
