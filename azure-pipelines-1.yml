@@ -11,26 +11,28 @@ variables:
   dockerfilePath: '**/Dockerfile'
   tag: '$(Build.BuildId)'
   imagePullSecret: 'pocaksregistry-auth'
-
-  # Agent VM image name
   vmImageName: 'ubuntu-latest'
 
   # Dependency-Track Variables
-  DEPENDENCY_TRACK_URL: "http://143.110.254.33:8081"
-  DEPENDENCY_TRACK_API_KEY: "odt_1FSR7OLxGw3k1zaQi93mLk1FVuXQujzA"
+  DEPENDENCY_TRACK_URL: "http://13.71.124.102:8080/api/v1/bom"
+  DEPENDENCY_TRACK_API_KEY: "odt_cotAAKi5aV1x9KhEwaZzwK8mcoTwtRCo"
   FULL_IMAGE_NAME: "$(containerRegistry)/$(imageRepository):$(tag)"
+  SBOM_REPORT_FILE: "sbom.json"
+  TRIVY_REPORT_FILE: "trivy-report.json"
+  TRIVY_CYCLONEDX_FILE: "trivy-cyclonedx.json"
+  PROJECT_UUID: 647ba19d-0886-4d99-bda3-788d172a9bd7
 
 stages:
 - stage: Build
-  displayName: Build stage
+  displayName: Build and Push Image
   jobs:
   - job: Build
-    displayName: Build and Push Image
+    displayName: Build and Push to ACR
     pool:
       vmImage: $(vmImageName)
     steps:
     - task: Docker@2
-      displayName: "Build and Push Image to ACR"
+      displayName: "Build and Push Image"
       inputs:
         command: buildAndPush
         repository: $(imageRepository)
@@ -39,105 +41,121 @@ stages:
         tags: |
           $(tag)
 
-    - upload: manifests
-      artifact: manifests
-
 - stage: KBOM
-  displayName: Generate SBOM and Scan for Vulnerabilities
+  displayName: Security Scans (SBOM & Trivy)
   dependsOn: Build
   jobs:
-  - job: GenerateKBOM
-    displayName: Generate SBOM and Scan Image
+  - job: SecurityScan
+    displayName: Generate SBOM and Scan for Vulnerabilities
     pool:
       vmImage: $(vmImageName)
     steps:
-    # ✅ Authenticate to Azure Container Registry (ACR)
     - task: Docker@2
       displayName: "Login to ACR"
       inputs:
         command: login
         containerRegistry: $(dockerRegistryServiceConnection)
 
-    # ✅ Install Syft
     - script: |
-        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-        syft version
-      displayName: "Install Syft"
+        #!/bin/sh
+        set -eo pipefail
 
-    # ✅ Generate SBOM using Syft
-    - script: |
-        syft $(FULL_IMAGE_NAME) -o json > sbom.json
-      displayName: "Generate SBOM with Syft"
+        # Function to install Syft if not installed
+        install_syft() {
+            echo "🔍 Checking Syft installation..."
+            if ! command -v syft &> /dev/null; then
+                echo "⚡ Syft not found. Installing..."
+                curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+                echo "✅ Syft installed successfully."
+            else
+                echo "✅ Syft is already installed."
+            fi
+        }
 
-    # ✅ Install and Verify Trivy (Fixed Version)
-    - script: |
-        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-        sudo mv ./bin/trivy /usr/local/bin/trivy
-        chmod +x /usr/local/bin/trivy
-        trivy --version
-      displayName: "Install and Verify Trivy"
+        # Function to install Trivy if not installed
+        install_trivy() {
+            echo "🔍 Checking Trivy installation..."
+            if ! command -v trivy &> /dev/null; then
+                echo "⚡ Trivy not found. Installing..."
+                curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+                echo "✅ Trivy installed successfully."
+            else
+                echo "✅ Trivy is already installed."
+            fi
+        }
 
-    # ✅ Scan Image for vulnerabilities using Trivy
-    - script: |
-        trivy image --format json -o trivy-report.json $(FULL_IMAGE_NAME)
-      displayName: "Scan Image for Vulnerabilities with Trivy"
+        # Install Syft and Trivy if needed
+        install_syft
+        install_trivy
 
-    # ✅ Upload SBOM and Trivy Reports as build artifacts
+        # Run Syft scan to generate SBOM
+        echo "📄 Generating SBOM for ($FULL_IMAGE_NAME) with Syft..."
+        if syft "$FULL_IMAGE_NAME" -o cyclonedx-json > "$(System.DefaultWorkingDirectory)/$(SBOM_REPORT_FILE)"; then
+            echo "✅ Syft scan complete. SBOM saved at $(System.DefaultWorkingDirectory)/$(SBOM_REPORT_FILE)."
+        else
+            echo "❌ Syft scan failed!" >&2
+            exit 1
+        fi
+
+        # Run Trivy scan to generate vulnerability report
+        echo "🔎 Scanning ($FULL_IMAGE_NAME) with Trivy..."
+        if trivy image --format json --output "$(System.DefaultWorkingDirectory)/$(TRIVY_REPORT_FILE)" "$FULL_IMAGE_NAME"; then
+            echo "✅ Trivy scan complete. Report saved at $(System.DefaultWorkingDirectory)/$(TRIVY_REPORT_FILE)."
+        else
+            echo "❌ Trivy scan failed!" >&2
+            exit 1
+        fi
+
+        # Convert Trivy report to CycloneDX format
+        echo "🔄 Converting Trivy report to CycloneDX format..."
+        if trivy image --format cyclonedx --output "$(System.DefaultWorkingDirectory)/$(TRIVY_CYCLONEDX_FILE)" "$FULL_IMAGE_NAME"; then
+            echo "✅ Trivy CycloneDX report saved at $(System.DefaultWorkingDirectory)/$(TRIVY_CYCLONEDX_FILE)."
+        else
+            echo "❌ Trivy CycloneDX conversion failed!" >&2
+            exit 1
+        fi
+      displayName: "Run SBOM & Trivy Scan"
+
     - task: PublishBuildArtifacts@1
-      displayName: "Upload SBOM and Trivy Reports"
+      displayName: "Upload Security Reports"
       inputs:
         pathToPublish: "$(System.DefaultWorkingDirectory)"
-        artifactName: "KBOM-Reports"
+        artifactName: "Security-Reports"
 
 - stage: UploadDependencyTrack
-  displayName: Upload Reports to OWASP Dependency-Track
+  displayName: Upload Reports to Dependency-Track
   dependsOn: KBOM
   jobs:
   - job: UploadReports
-    displayName: Upload SBOM & Vulnerability Reports
+    displayName: Upload SBOM & Trivy Reports
     pool:
       vmImage: $(vmImageName)
     steps:
-    # ✅ Upload SBOM to OWASP Dependency-Track
     - script: |
-        curl -X POST -H "X-Api-Key: $(DEPENDENCY_TRACK_API_KEY)" -F "file=@sbom.json" $(DEPENDENCY_TRACK_URL)/api/v1/bom
-      displayName: "Upload SBOM to OWASP Dependency-Track"
+        #!/bin/sh
+        set -eo pipefail
 
-    # ✅ Upload Vulnerability Report to OWASP Dependency-Track
-    - script: |
-        curl -X POST -H "X-Api-Key: $(DEPENDENCY_TRACK_API_KEY)" -F "file=@trivy-report.json" $(DEPENDENCY_TRACK_URL)/api/v1/vulnerability
-      displayName: "Upload Vulnerability Report to OWASP Dependency-Track"
+        echo "🚀 Uploading Syft SBOM to Dependency-Track..."
+        if curl -X "POST" "$(DEPENDENCY_TRACK_URL)" \
+             -H "Content-Type: multipart/form-data" \
+             -H "X-Api-Key: $(DEPENDENCY_TRACK_API_KEY)" \
+             -F "project=$(PROJECT_UUID)" \
+             -F "bom=@$(System.DefaultWorkingDirectory)/$(SBOM_REPORT_FILE)"; then
+            echo "✅ Syft SBOM uploaded successfully."
+        else
+            echo "❌ Failed to upload Syft SBOM to Dependency-Track!" >&2
+            exit 1
+        fi
 
-- stage: Deploy
-  displayName: Deploy stage
-  dependsOn: UploadDependencyTrack
-  jobs:
-  - deployment: Deploy
-    displayName: Deploy to Kubernetes
-    pool:
-      vmImage: $(vmImageName)
-    environment: 'bhattyash32kuberneteshelloworldpythonflask.default'
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          # ✅ Create Kubernetes imagePullSecret
-          - task: KubernetesManifest@0
-            displayName: "Create imagePullSecret"
-            inputs:
-              action: createSecret
-              secretName: $(imagePullSecret)
-              dockerRegistryEndpoint: $(dockerRegistryServiceConnection)
-
-          # ✅ Deploy to Kubernetes Cluster
-          - task: KubernetesManifest@0
-            displayName: "Deploy to Kubernetes Cluster"
-            inputs:
-              action: deploy
-              manifests: |
-                $(Pipeline.Workspace)/manifests/deployment.yml
-                $(Pipeline.Workspace)/manifests/service.yml
-              imagePullSecrets: |
-                $(imagePullSecret)
-              containers: |
-                $(containerRegistry)/$(imageRepository):$(tag)
+        echo "🚀 Uploading Trivy CycloneDX report to Dependency-Track..."
+        if curl -X "POST" "$(DEPENDENCY_TRACK_URL)" \
+             -H "Content-Type: multipart/form-data" \
+             -H "X-Api-Key: $(DEPENDENCY_TRACK_API_KEY)" \
+             -F "project=$(PROJECT_UUID)" \
+             -F "bom=@$(System.DefaultWorkingDirectory)/$(TRIVY_CYCLONEDX_FILE)"; then
+            echo "✅ Trivy CycloneDX report uploaded successfully."
+        else
+            echo "❌ Failed to upload Trivy report to Dependency-Track!" >&2
+            exit 1
+        fi
+      displayName: "Upload SBOM & Vulnerability Reports to OWASP Dependency-Track"
