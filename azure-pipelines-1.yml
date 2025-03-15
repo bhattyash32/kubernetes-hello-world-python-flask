@@ -130,7 +130,7 @@ stages:
         ls -al $(System.DefaultWorkingDirectory)
       displayName: "Debug: List Downloaded Files"
 
-    # ✅ Upload SBOM & Vulnerability Reports to Dependency-Track
+    # ✅ Upload SBOM & Trivy CycloneDX Reports to Dependency-Track
     - script: |
         #!/bin/sh
         set -eo pipefail
@@ -154,4 +154,22 @@ stages:
             echo "❌ Failed to upload Syft SBOM to Dependency-Track!" >&2
             exit 1
         fi
-      displayName: "Upload SBOM to Dependency-Track"
+
+        # Ensure Trivy CycloneDX file exists
+        if [ ! -f "$TRIVY_CYCLONEDX_FILE" ]; then
+            echo "❌ ERROR: Trivy CycloneDX file ($TRIVY_CYCLONEDX_FILE) not found!"
+            exit 1
+        fi
+
+        echo "🚀 Uploading Trivy CycloneDX report to Dependency-Track..."
+        if curl -X "POST" "$(DEPENDENCY_TRACK_URL)" \
+             -H "Content-Type: multipart/form-data" \
+             -H "X-Api-Key: $(DEPENDENCY_TRACK_API_KEY)" \
+             -F "project=$(PROJECT_UUID)" \
+             -F "bom=@$TRIVY_CYCLONEDX_FILE"; then
+            echo "✅ Trivy CycloneDX report uploaded successfully."
+        else
+            echo "❌ Failed to upload Trivy CycloneDX report to Dependency-Track!" >&2
+            exit 1
+        fi
+      displayName: "Upload SBOM & Trivy CycloneDX Reports to Dependency-Track"
