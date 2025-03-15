@@ -14,7 +14,7 @@ variables:
   vmImageName: 'ubuntu-latest'
 
   # Dependency-Track Variables
-  DEPENDENCY_TRACK_URL: "http://13.71.124.102:8080/api/v1/bom"
+  DEPENDENCY_TRACK_URL: "http://13.71.124.102:8081/api/v1/bom"
   DEPENDENCY_TRACK_API_KEY: "odt_cotAAKi5aV1x9KhEwaZzwK8mcoTwtRCo"
   FULL_IMAGE_NAME: "$(containerRegistry)/$(imageRepository):$(tag)"
   ARTIFACT_NAME: "Security-Reports"
