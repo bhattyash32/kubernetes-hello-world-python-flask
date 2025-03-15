@@ -69,11 +69,13 @@ stages:
         syft $(FULL_IMAGE_NAME) -o json > sbom.json
       displayName: "Generate SBOM with Syft"
 
-    # ✅ Install Trivy for vulnerability scanning
+    # ✅ Install and Verify Trivy (Fixed Version)
     - script: |
-        curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+        sudo mv ./bin/trivy /usr/local/bin/trivy
+        chmod +x /usr/local/bin/trivy
         trivy --version
-      displayName: "Install Trivy"
+      displayName: "Install and Verify Trivy"
 
     # ✅ Scan Image for vulnerabilities using Trivy
     - script: |
