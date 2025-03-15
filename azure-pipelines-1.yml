@@ -17,10 +17,10 @@ variables:
   DEPENDENCY_TRACK_URL: "http://13.71.124.102:8080/api/v1/bom"
   DEPENDENCY_TRACK_API_KEY: "odt_cotAAKi5aV1x9KhEwaZzwK8mcoTwtRCo"
   FULL_IMAGE_NAME: "$(containerRegistry)/$(imageRepository):$(tag)"
-  SBOM_REPORT_FILE: "sbom.json"
-  TRIVY_REPORT_FILE: "trivy-report.json"
-  TRIVY_CYCLONEDX_FILE: "trivy-cyclonedx.json"
-  PROJECT_UUID: 647ba19d-0886-4d99-bda3-788d172a9bd7
+  SBOM_REPORT_FILE: "$(System.DefaultWorkingDirectory)/sbom.json"
+  TRIVY_REPORT_FILE: "$(System.DefaultWorkingDirectory)/trivy-report.json"
+  TRIVY_CYCLONEDX_FILE: "$(System.DefaultWorkingDirectory)/trivy-cyclonedx.json"
+  PROJECT_UUID: "647ba19d-0886-4d99-bda3-788d172a9bd7"
 
 stages:
 - stage: Build
@@ -90,17 +90,23 @@ stages:
 
         # Run Syft scan to generate SBOM
         echo "📄 Generating SBOM for ($FULL_IMAGE_NAME) with Syft..."
-        if syft "$FULL_IMAGE_NAME" -o cyclonedx-json > "$(System.DefaultWorkingDirectory)/$(SBOM_REPORT_FILE)"; then
-            echo "✅ Syft scan complete. SBOM saved at $(System.DefaultWorkingDirectory)/$(SBOM_REPORT_FILE)."
+        if syft "$FULL_IMAGE_NAME" -o cyclonedx-json > "$SBOM_REPORT_FILE"; then
+            echo "✅ Syft scan complete. SBOM saved at $SBOM_REPORT_FILE."
         else
             echo "❌ Syft scan failed!" >&2
             exit 1
         fi
 
+        # Ensure SBOM file exists
+        if [ ! -f "$SBOM_REPORT_FILE" ]; then
+            echo "❌ ERROR: SBOM file not found after Syft scan!"
+            exit 1
+        fi
+
         # Run Trivy scan to generate vulnerability report
         echo "🔎 Scanning ($FULL_IMAGE_NAME) with Trivy..."
-        if trivy image --format json --output "$(System.DefaultWorkingDirectory)/$(TRIVY_REPORT_FILE)" "$FULL_IMAGE_NAME"; then
-            echo "✅ Trivy scan complete. Report saved at $(System.DefaultWorkingDirectory)/$(TRIVY_REPORT_FILE)."
+        if trivy image --format json --output "$TRIVY_REPORT_FILE" "$FULL_IMAGE_NAME"; then
+            echo "✅ Trivy scan complete. Report saved at $TRIVY_REPORT_FILE."
         else
             echo "❌ Trivy scan failed!" >&2
             exit 1
@@ -108,8 +114,8 @@ stages:
 
         # Convert Trivy report to CycloneDX format
         echo "🔄 Converting Trivy report to CycloneDX format..."
-        if trivy image --format cyclonedx --output "$(System.DefaultWorkingDirectory)/$(TRIVY_CYCLONEDX_FILE)" "$FULL_IMAGE_NAME"; then
-            echo "✅ Trivy CycloneDX report saved at $(System.DefaultWorkingDirectory)/$(TRIVY_CYCLONEDX_FILE)."
+        if trivy image --format cyclonedx --output "$TRIVY_CYCLONEDX_FILE" "$FULL_IMAGE_NAME"; then
+            echo "✅ Trivy CycloneDX report saved at $TRIVY_CYCLONEDX_FILE."
         else
             echo "❌ Trivy CycloneDX conversion failed!" >&2
             exit 1
@@ -135,15 +141,27 @@ stages:
         #!/bin/sh
         set -eo pipefail
 
+        # Check if SBOM file exists
+        if [ ! -f "$SBOM_REPORT_FILE" ]; then
+            echo "❌ ERROR: Syft SBOM file ($SBOM_REPORT_FILE) not found!"
+            exit 1
+        fi
+
         echo "🚀 Uploading Syft SBOM to Dependency-Track..."
         if curl -X "POST" "$(DEPENDENCY_TRACK_URL)" \
              -H "Content-Type: multipart/form-data" \
              -H "X-Api-Key: $(DEPENDENCY_TRACK_API_KEY)" \
              -F "project=$(PROJECT_UUID)" \
-             -F "bom=@$(System.DefaultWorkingDirectory)/$(SBOM_REPORT_FILE)"; then
+             -F "bom=@$SBOM_REPORT_FILE"; then
             echo "✅ Syft SBOM uploaded successfully."
         else
             echo "❌ Failed to upload Syft SBOM to Dependency-Track!" >&2
+            exit 1
+        fi
+
+        # Check if Trivy CycloneDX report exists
+        if [ ! -f "$TRIVY_CYCLONEDX_FILE" ]; then
+            echo "❌ ERROR: Trivy CycloneDX file ($TRIVY_CYCLONEDX_FILE) not found!"
             exit 1
         fi
 
@@ -152,7 +170,7 @@ stages:
              -H "Content-Type: multipart/form-data" \
              -H "X-Api-Key: $(DEPENDENCY_TRACK_API_KEY)" \
              -F "project=$(PROJECT_UUID)" \
-             -F "bom=@$(System.DefaultWorkingDirectory)/$(TRIVY_CYCLONEDX_FILE)"; then
+             -F "bom=@$TRIVY_CYCLONEDX_FILE"; then
             echo "✅ Trivy CycloneDX report uploaded successfully."
         else
             echo "❌ Failed to upload Trivy report to Dependency-Track!" >&2
