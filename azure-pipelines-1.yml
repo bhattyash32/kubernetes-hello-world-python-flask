@@ -16,8 +16,8 @@ variables:
   vmImageName: 'ubuntu-latest'
 
   # Dependency-Track Variables
-  DEPENDENCY_TRACK_URL: "http://13.71.124.102:8080"
-  DEPENDENCY_TRACK_API_KEY: "odt_cotAAKi5aV1x9KhEwaZzwK8mcoTwtRCo"
+  DEPENDENCY_TRACK_URL: "http://143.110.254.33:8081"
+  DEPENDENCY_TRACK_API_KEY: "odt_1FSR7OLxGw3k1zaQi93mLk1FVuXQujzA"
   FULL_IMAGE_NAME: "$(containerRegistry)/$(imageRepository):$(tag)"
 
 stages:
