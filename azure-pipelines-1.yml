@@ -17,9 +17,7 @@ variables:
   DEPENDENCY_TRACK_URL: "http://13.71.124.102:8080/api/v1/bom"
   DEPENDENCY_TRACK_API_KEY: "odt_cotAAKi5aV1x9KhEwaZzwK8mcoTwtRCo"
   FULL_IMAGE_NAME: "$(containerRegistry)/$(imageRepository):$(tag)"
-  SBOM_REPORT_FILE: "$(System.DefaultWorkingDirectory)/sbom.json"
-  TRIVY_REPORT_FILE: "$(System.DefaultWorkingDirectory)/trivy-report.json"
-  TRIVY_CYCLONEDX_FILE: "$(System.DefaultWorkingDirectory)/trivy-cyclonedx.json"
+  ARTIFACT_NAME: "Security-Reports"
   PROJECT_UUID: "647ba19d-0886-4d99-bda3-788d172a9bd7"
 
 stages:
@@ -59,34 +57,21 @@ stages:
     - script: |
         #!/bin/sh
         set -eo pipefail
+        SBOM_REPORT_FILE="$(System.DefaultWorkingDirectory)/sbom.json"
+        TRIVY_REPORT_FILE="$(System.DefaultWorkingDirectory)/trivy-report.json"
+        TRIVY_CYCLONEDX_FILE="$(System.DefaultWorkingDirectory)/trivy-cyclonedx.json"
 
-        # Function to install Syft if not installed
-        install_syft() {
-            echo "🔍 Checking Syft installation..."
-            if ! command -v syft &> /dev/null; then
-                echo "⚡ Syft not found. Installing..."
-                curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-                echo "✅ Syft installed successfully."
-            else
-                echo "✅ Syft is already installed."
-            fi
-        }
+        # Install Syft if not installed
+        if ! command -v syft &> /dev/null; then
+            echo "⚡ Syft not found. Installing..."
+            curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+        fi
 
-        # Function to install Trivy if not installed
-        install_trivy() {
-            echo "🔍 Checking Trivy installation..."
-            if ! command -v trivy &> /dev/null; then
-                echo "⚡ Trivy not found. Installing..."
-                curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-                echo "✅ Trivy installed successfully."
-            else
-                echo "✅ Trivy is already installed."
-            fi
-        }
-
-        # Install Syft and Trivy if needed
-        install_syft
-        install_trivy
+        # Install Trivy if not installed
+        if ! command -v trivy &> /dev/null; then
+            echo "⚡ Trivy not found. Installing..."
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+        fi
 
         # Run Syft scan to generate SBOM
         echo "📄 Generating SBOM for ($FULL_IMAGE_NAME) with Syft..."
@@ -94,12 +79,6 @@ stages:
             echo "✅ Syft scan complete. SBOM saved at $SBOM_REPORT_FILE."
         else
             echo "❌ Syft scan failed!" >&2
-            exit 1
-        fi
-
-        # Ensure SBOM file exists
-        if [ ! -f "$SBOM_REPORT_FILE" ]; then
-            echo "❌ ERROR: SBOM file not found after Syft scan!"
             exit 1
         fi
 
@@ -120,13 +99,14 @@ stages:
             echo "❌ Trivy CycloneDX conversion failed!" >&2
             exit 1
         fi
-      displayName: "Run SBOM & Trivy Scan"
+      displayName: "Run Syft & Trivy Scan"
 
-    - task: PublishBuildArtifacts@1
-      displayName: "Upload Security Reports"
+    # ✅ Save SBOM and Trivy reports as Pipeline Artifacts
+    - task: PublishPipelineArtifact@1
+      displayName: "Upload Security Reports as Artifacts"
       inputs:
-        pathToPublish: "$(System.DefaultWorkingDirectory)"
-        artifactName: "Security-Reports"
+        targetPath: "$(System.DefaultWorkingDirectory)"
+        artifact: "$(ARTIFACT_NAME)"
 
 - stage: UploadDependencyTrack
   displayName: Upload Reports to Dependency-Track
@@ -137,13 +117,29 @@ stages:
     pool:
       vmImage: $(vmImageName)
     steps:
+    # ✅ Download previously saved artifacts (SBOM & Trivy reports)
+    - task: DownloadPipelineArtifact@2
+      displayName: "Download Security Reports"
+      inputs:
+        artifact: "$(ARTIFACT_NAME)"
+        path: "$(System.DefaultWorkingDirectory)"
+
+    # ✅ Debug: List files to confirm they were downloaded
+    - script: |
+        echo "📂 Listing files in $(System.DefaultWorkingDirectory) after download..."
+        ls -al $(System.DefaultWorkingDirectory)
+      displayName: "Debug: List Downloaded Files"
+
+    # ✅ Upload SBOM & Vulnerability Reports to Dependency-Track
     - script: |
         #!/bin/sh
         set -eo pipefail
+        SBOM_FILE="$(System.DefaultWorkingDirectory)/sbom.json"
+        TRIVY_CYCLONEDX_FILE="$(System.DefaultWorkingDirectory)/trivy-cyclonedx.json"
 
-        # Check if SBOM file exists
-        if [ ! -f "$SBOM_REPORT_FILE" ]; then
-            echo "❌ ERROR: Syft SBOM file ($SBOM_REPORT_FILE) not found!"
+        # Ensure SBOM file exists
+        if [ ! -f "$SBOM_FILE" ]; then
+            echo "❌ ERROR: Syft SBOM file ($SBOM_FILE) not found!"
             exit 1
         fi
 
@@ -152,28 +148,10 @@ stages:
              -H "Content-Type: multipart/form-data" \
              -H "X-Api-Key: $(DEPENDENCY_TRACK_API_KEY)" \
              -F "project=$(PROJECT_UUID)" \
-             -F "bom=@$SBOM_REPORT_FILE"; then
+             -F "bom=@$SBOM_FILE"; then
             echo "✅ Syft SBOM uploaded successfully."
         else
             echo "❌ Failed to upload Syft SBOM to Dependency-Track!" >&2
             exit 1
         fi
-
-        # Check if Trivy CycloneDX report exists
-        if [ ! -f "$TRIVY_CYCLONEDX_FILE" ]; then
-            echo "❌ ERROR: Trivy CycloneDX file ($TRIVY_CYCLONEDX_FILE) not found!"
-            exit 1
-        fi
-
-        echo "🚀 Uploading Trivy CycloneDX report to Dependency-Track..."
-        if curl -X "POST" "$(DEPENDENCY_TRACK_URL)" \
-             -H "Content-Type: multipart/form-data" \
-             -H "X-Api-Key: $(DEPENDENCY_TRACK_API_KEY)" \
-             -F "project=$(PROJECT_UUID)" \
-             -F "bom=@$TRIVY_CYCLONEDX_FILE"; then
-            echo "✅ Trivy CycloneDX report uploaded successfully."
-        else
-            echo "❌ Failed to upload Trivy report to Dependency-Track!" >&2
-            exit 1
-        fi
-      displayName: "Upload SBOM & Vulnerability Reports to OWASP Dependency-Track"
+      displayName: "Upload SBOM to Dependency-Track"
