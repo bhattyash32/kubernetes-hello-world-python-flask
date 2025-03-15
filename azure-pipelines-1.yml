@@ -15,7 +15,7 @@ variables:
 
   # Dependency-Track Variables
   DEPENDENCY_TRACK_URL: "http://143.110.254.33:8081/api/v1/bom"
-  DEPENDENCY_TRACK_API_KEY: "odt_cotAAKi5aV1x9KhEwaZzwK8mcoTwtRCo"
+  DEPENDENCY_TRACK_API_KEY: "odt_1FSR7OLxGw3k1zaQi93mLk1FVuXQujzA"
   FULL_IMAGE_NAME: "$(containerRegistry)/$(imageRepository):$(tag)"
   ARTIFACT_NAME: "Security-Reports"
   PROJECT_UUID: "647ba19d-0886-4d99-bda3-788d172a9bd7"
